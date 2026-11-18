@@ -1,0 +1,30 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rooms/{roomId} {
+      // Anyone with the room code / link can read room state and participate in voting
+      allow read: if true;
+
+      // Room creation validation
+      allow create: if request.resource.data.id == roomId
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() > 0
+                    && request.resource.data.name.size() <= 100
+                    && request.resource.data.ownerId is string
+                    && request.resource.data.ownerId.size() > 0
+                    && request.resource.data.revealed is bool
+                    && request.resource.data.round is int
+                    && request.resource.data.participants is map;
+
+      // Room update validation (joining, selecting cards, revealing, resetting round)
+      allow update: if request.resource.data.id == resource.data.id
+                    && request.resource.data.ownerId == resource.data.ownerId
+                    && request.resource.data.revealed is bool
+                    && request.resource.data.round is int
+                    && request.resource.data.participants is map;
+
+      allow delete: if false;
+    }
+  }
+}

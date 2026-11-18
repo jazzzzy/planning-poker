@@ -1,0 +1,72 @@
+/* ─── Google Fonts ─────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #090d16;
+  color: #f8fafc;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer utilities {
+  .glass-panel {
+    background: rgba(15, 23, 42, 0.72);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  }
+
+  .poker-table-felt {
+    background: radial-gradient(
+      ellipse at center,
+      rgba(30, 41, 59, 0.95) 0%,
+      rgba(15, 23, 42, 0.98) 65%,
+      rgba(9, 13, 22, 1) 100%
+    );
+    box-shadow:
+      0 0 0 8px rgba(30, 41, 59, 0.8),
+      0 0 0 10px rgba(99, 102, 241, 0.25),
+      0 30px 70px -15px rgba(0, 0, 0, 0.8),
+      inset 0 0 60px rgba(99, 102, 241, 0.12);
+  }
+
+  .card-back-pattern {
+    background-color: #312e81;
+    background-image:
+      radial-gradient(rgba(129, 140, 248, 0.28) 1.5px, transparent 1.5px),
+      radial-gradient(rgba(129, 140, 248, 0.18) 1.5px, #312e81 1.5px);
+    background-size: 12px 12px;
+    background-position: 0 0, 6px 6px;
+  }
+}
+
+@keyframes cardPop {
+  0% {
+    transform: scale(0.92) rotateY(90deg);
+    opacity: 0.4;
+  }
+  100% {
+    transform: scale(1) rotateY(0deg);
+    opacity: 1;
+  }
+}
+
+.animate-card-reveal {
+  animation: cardPop 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
