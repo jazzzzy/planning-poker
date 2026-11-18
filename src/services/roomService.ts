@@ -27,9 +27,9 @@ export function generateRoomCode(): string {
   return Array.from(array, (n) => chars[n % chars.length]).join('')
 }
 
-// ─── Local Fallback Helpers (for instant local multi-tab testing before .env is set) ───
+// ─── Local & Dev-Server Sync Helpers (works across different browsers + tabs) ───
 
-function getLocalRoom(roomId: string): Room | null {
+function getCachedLocalRoom(roomId: string): Room | null {
   try {
     const raw = localStorage.getItem(`${LOCAL_STORAGE_PREFIX}${roomId}`)
     return raw ? (JSON.parse(raw) as Room) : null
@@ -38,12 +38,51 @@ function getLocalRoom(roomId: string): Room | null {
   }
 }
 
-function saveLocalRoom(room: Room): void {
+async function fetchLocalRoom(roomId: string): Promise<Room | null> {
+  try {
+    const res = await fetch(`/__dev_rooms/${roomId}`)
+    if (res.ok) {
+      const data = (await res.json()) as { room: Room | null }
+      if (data.room) {
+        localStorage.setItem(`${LOCAL_STORAGE_PREFIX}${roomId}`, JSON.stringify(data.room))
+        return data.room
+      }
+    }
+  } catch {
+    // Fallback to localStorage if dev server endpoint is not reachable
+  }
+
+  // Fallback: if localStorage has it, push it up to the dev server so other browsers can see it
+  const cached = getCachedLocalRoom(roomId)
+  if (cached) {
+    try {
+      await fetch(`/__dev_rooms/${roomId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room: cached }),
+      })
+    } catch {
+      // ignore
+    }
+  }
+  return cached
+}
+
+async function saveLocalRoom(room: Room): Promise<void> {
   localStorage.setItem(`${LOCAL_STORAGE_PREFIX}${room.id}`, JSON.stringify(room))
   broadcastChannel?.postMessage({ type: 'ROOM_UPDATED', roomId: room.id, room })
   window.dispatchEvent(
     new CustomEvent('local-room-update', { detail: { roomId: room.id, room } })
   )
+  try {
+    await fetch(`/__dev_rooms/${room.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room }),
+    })
+  } catch {
+    // ignore if offline
+  }
 }
 
 // ─── Public Room Service API ──────────────────────────────────────────────────────────
@@ -79,7 +118,7 @@ export async function createRoom(
     const roomRef = doc(db, 'rooms', roomId)
     await setDoc(roomRef, room)
   } else {
-    saveLocalRoom(room)
+    await saveLocalRoom(room)
   }
 
   return room
@@ -123,7 +162,7 @@ export async function joinRoom(
       },
     }
   } else {
-    const existingRoom = getLocalRoom(normalizedCode)
+    const existingRoom = await fetchLocalRoom(normalizedCode)
     if (!existingRoom) {
       throw new Error(`Room "${normalizedCode}" was not found. Check the code or create a new room.`)
     }
@@ -143,7 +182,7 @@ export async function joinRoom(
         [userId]: participant,
       },
     }
-    saveLocalRoom(updated)
+    await saveLocalRoom(updated)
     return updated
   }
 }
@@ -171,8 +210,30 @@ export function subscribeToRoom(
       }
     )
   } else {
-    // Initial emit
-    onUpdate(getLocalRoom(normalizedCode))
+    // 1. Emit initial room state from dev server (or local cache)
+    void fetchLocalRoom(normalizedCode).then((room) => {
+      if (room) onUpdate(room)
+    })
+
+    // 2. Listen to Server-Sent Events (SSE) for real-time cross-browser updates
+    let eventSource: EventSource | null = null
+    if (typeof EventSource !== 'undefined') {
+      eventSource = new EventSource('/__dev_rooms/events')
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data) as { roomId: string; room: Room }
+          if (data.roomId === normalizedCode && data.room) {
+            localStorage.setItem(
+              `${LOCAL_STORAGE_PREFIX}${normalizedCode}`,
+              JSON.stringify(data.room)
+            )
+            onUpdate(data.room)
+          }
+        } catch {
+          // ignore malformed event
+        }
+      }
+    }
 
     const handleBroadcast = (event: MessageEvent) => {
       if (event.data?.type === 'ROOM_UPDATED' && event.data?.roomId === normalizedCode) {
@@ -182,7 +243,7 @@ export function subscribeToRoom(
 
     const handleStorage = (event: StorageEvent) => {
       if (event.key === `${LOCAL_STORAGE_PREFIX}${normalizedCode}`) {
-        onUpdate(getLocalRoom(normalizedCode))
+        onUpdate(getCachedLocalRoom(normalizedCode))
       }
     }
 
@@ -198,6 +259,7 @@ export function subscribeToRoom(
     window.addEventListener('local-room-update', handleCustom)
 
     return () => {
+      eventSource?.close()
       broadcastChannel?.removeEventListener('message', handleBroadcast)
       window.removeEventListener('storage', handleStorage)
       window.removeEventListener('local-room-update', handleCustom)
@@ -218,13 +280,13 @@ export async function selectCard(
       [`participants.${userId}.vote`]: vote,
     })
   } else {
-    const room = getLocalRoom(normalizedCode)
+    const room = await fetchLocalRoom(normalizedCode)
     if (!room || !room.participants[userId]) return
     room.participants[userId] = {
       ...room.participants[userId],
       vote,
     }
-    saveLocalRoom(room)
+    await saveLocalRoom(room)
   }
 }
 
@@ -237,10 +299,10 @@ export async function revealCards(roomId: string): Promise<void> {
       revealed: true,
     })
   } else {
-    const room = getLocalRoom(normalizedCode)
+    const room = await fetchLocalRoom(normalizedCode)
     if (!room) return
     room.revealed = true
-    saveLocalRoom(room)
+    await saveLocalRoom(room)
   }
 }
 
@@ -258,7 +320,7 @@ export async function startNewRound(roomId: string, currentRoom: Room): Promise<
     }
     await updateDoc(roomRef, updates)
   } else {
-    const room = getLocalRoom(normalizedCode)
+    const room = await fetchLocalRoom(normalizedCode)
     if (!room) return
     const resetParticipants: Record<string, Participant> = {}
     for (const [pid, p] of Object.entries(room.participants)) {
@@ -267,7 +329,7 @@ export async function startNewRound(roomId: string, currentRoom: Room): Promise<
     room.revealed = false
     room.round = (room.round || 1) + 1
     room.participants = resetParticipants
-    saveLocalRoom(room)
+    await saveLocalRoom(room)
   }
 }
 
@@ -284,9 +346,9 @@ export async function leaveRoom(roomId: string, userId: string): Promise<void> {
       // Ignore if room doesn't exist
     }
   } else {
-    const room = getLocalRoom(normalizedCode)
+    const room = await fetchLocalRoom(normalizedCode)
     if (!room) return
     delete room.participants[userId]
-    saveLocalRoom(room)
+    await saveLocalRoom(room)
   }
 }
