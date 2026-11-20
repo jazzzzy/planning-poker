@@ -44,8 +44,17 @@ export function PokerRoom({
       ? (numericVotes.reduce((acc, n) => acc + n, 0) / numericVotes.length).toFixed(1)
       : null
 
-  const allAgree =
-    numericVotes.length > 1 && numericVotes.every((v) => v === numericVotes[0])
+  const numericScale = [0, 1, 2, 3, 5, 8, 13, 21]
+  const minVote = numericVotes.length > 0 ? Math.min(...numericVotes) : null
+  const maxVote = numericVotes.length > 0 ? Math.max(...numericVotes) : null
+  const stepSpread =
+    minVote !== null && maxVote !== null
+      ? numericScale.indexOf(maxVote) - numericScale.indexOf(minVote)
+      : 0
+
+  const allAgree = numericVotes.length > 1 && stepSpread === 0
+  const closeAlignment = numericVotes.length > 1 && stepSpread === 1
+  const reestimationNeeded = numericVotes.length > 1 && stepSpread >= 2
 
   // Vote breakdown counts for revealed summary
   const voteCounts = participantsList.reduce<Record<string, number>>((acc, p) => {
@@ -244,8 +253,20 @@ export function PokerRoom({
                   </div>
 
                   {allAgree && (
-                    <div className="px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
-                      🎉 Consensus!
+                    <div className="px-4 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-1.5">
+                      <span>🎉 You reached consensus!</span>
+                    </div>
+                  )}
+
+                  {closeAlignment && (
+                    <div className="px-4 py-2.5 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-300 text-xs font-semibold flex items-center gap-1.5">
+                      <span>👍 Close alignment (within 1 step)</span>
+                    </div>
+                  )}
+
+                  {reestimationNeeded && (
+                    <div className="px-4 py-2.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1.5">
+                      <span>⚠️ Estimations are far apart ({minVote} vs {maxVote}) — discussion &amp; re-estimation needed!</span>
                     </div>
                   )}
                 </div>
