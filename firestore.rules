@@ -19,7 +19,8 @@ service cloud.firestore {
 
       // Room update validation (joining, selecting cards, revealing, resetting round)
       allow update: if request.resource.data.id == resource.data.id
-                    && request.resource.data.ownerId == resource.data.ownerId
+                    && request.resource.data.ownerId is string
+                    && request.resource.data.ownerId.size() > 0
                     && request.resource.data.revealed is bool
                     && request.resource.data.round is int
                     && request.resource.data.participants is map;

@@ -143,23 +143,48 @@ export async function joinRoom(
     const roomData = snap.data() as Room
     const existing = roomData.participants?.[userId]
 
+    // Find any stale duplicate entry with the exact same display name (case-insensitive)
+    // from a previous tab/session so the user never appears twice in the room.
+    const duplicateEntry = Object.values(roomData.participants || {}).find(
+      (p) => p.id !== userId && p.name.trim().toLowerCase() === trimmedName.toLowerCase()
+    )
+
+    const previousRecord = existing || duplicateEntry
+
     const participant: Participant = {
       id: userId,
       name: trimmedName,
-      vote: existing ? existing.vote : null,
-      joinedAt: existing ? existing.joinedAt : Date.now(),
+      vote: previousRecord ? previousRecord.vote : null,
+      joinedAt: previousRecord ? previousRecord.joinedAt : Date.now(),
     }
 
-    await updateDoc(roomRef, {
+    const updates: Record<string, unknown> = {
       [`participants.${userId}`]: participant,
-    })
+    }
+
+    if (duplicateEntry) {
+      updates[`participants.${duplicateEntry.id}`] = deleteField()
+      // If the duplicate entry was the room owner, transfer ownership to the returning user's current ID
+      if (roomData.ownerId === duplicateEntry.id) {
+        updates.ownerId = userId
+      }
+    }
+
+    await updateDoc(roomRef, updates)
+
+    const updatedParticipants = { ...roomData.participants }
+    if (duplicateEntry) {
+      delete updatedParticipants[duplicateEntry.id]
+    }
+    updatedParticipants[userId] = participant
 
     return {
       ...roomData,
-      participants: {
-        ...roomData.participants,
-        [userId]: participant,
-      },
+      ownerId:
+        duplicateEntry && roomData.ownerId === duplicateEntry.id
+          ? userId
+          : roomData.ownerId,
+      participants: updatedParticipants,
     }
   } else {
     const existingRoom = await fetchLocalRoom(normalizedCode)
@@ -168,19 +193,31 @@ export async function joinRoom(
     }
 
     const existingParticipant = existingRoom.participants[userId]
+    const duplicateEntry = Object.values(existingRoom.participants || {}).find(
+      (p) => p.id !== userId && p.name.trim().toLowerCase() === trimmedName.toLowerCase()
+    )
+    const previousRecord = existingParticipant || duplicateEntry
+
     const participant: Participant = {
       id: userId,
       name: trimmedName,
-      vote: existingParticipant ? existingParticipant.vote : null,
-      joinedAt: existingParticipant ? existingParticipant.joinedAt : Date.now(),
+      vote: previousRecord ? previousRecord.vote : null,
+      joinedAt: previousRecord ? previousRecord.joinedAt : Date.now(),
     }
+
+    const updatedParticipants = { ...existingRoom.participants }
+    if (duplicateEntry) {
+      delete updatedParticipants[duplicateEntry.id]
+    }
+    updatedParticipants[userId] = participant
 
     const updated: Room = {
       ...existingRoom,
-      participants: {
-        ...existingRoom.participants,
-        [userId]: participant,
-      },
+      ownerId:
+        duplicateEntry && existingRoom.ownerId === duplicateEntry.id
+          ? userId
+          : existingRoom.ownerId,
+      participants: updatedParticipants,
     }
     await saveLocalRoom(updated)
     return updated
